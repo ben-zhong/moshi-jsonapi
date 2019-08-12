@@ -1,0 +1,63 @@
+plugins {
+    id 'java'
+    id 'idea'
+    id 'maven'
+    id 'jacoco'
+    id 'com.github.kt3k.coveralls' version '2.6.3'
+}
+
+apply plugin: 'com.novoda.bintray-release'
+
+sourceCompatibility = '1.7'
+targetCompatibility = '1.7'
+
+sourceSets {
+    test {
+        resources {
+            srcDir "resources"
+            includes["**/*.json"]
+        }
+    }
+}
+
+dependencies {
+    compileOnly 'com.squareup.moshi:moshi:1.4.0'
+    testCompile 'com.squareup.moshi:moshi:1.4.0'
+    testCompile 'junit:junit:4.12'
+}
+
+test {
+    testLogging {
+        events "passed", "skipped", "failed", "standardOut", "standardError"
+    }
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier 'javadoc'
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives sourcesJar
+    archives javadocJar
+}
+
+jacocoTestReport {
+    reports {
+        xml.enabled = true // coveralls plugin depends on xml format report
+        html.enabled = true
+    }
+}
+
+publish {
+    groupId = 'moe.banana'
+    artifactId = 'moshi-jsonapi'
+    publishVersion = describeVersion()
+    desc = 'Implement JSON API v1.0 Specification in Moshi.'
+    website = 'https://github.com/kamikat/moshi-jsonapi'
+}

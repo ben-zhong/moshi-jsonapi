@@ -6,7 +6,7 @@
 
 Java implementation of [JSON API](http://jsonapi.org/) specification v1.0 for [moshi](https://github.com/square/moshi).
 
-## Setup
+## Getting Started
 
 ```java
 JsonAdapter.Factory jsonApiAdapterFactory = ResourceAdapterFactory.builder()
@@ -25,50 +25,15 @@ You're now ready to serialize/deserialize JSON API objects with cool Moshi inter
 
 ```java
 String json = "...";
-Type type = Types.newParameterizedType(Document.class, Article.class); // Document<Article>
-JsonAdapter<Document<Article>> adapter = ((JsonAdapter<Document<Article>>) moshi.adapter(type));
-Document<Article> articles = adapter.fromJson(json);
+ArrayDocument<Article> articles = moshi.adapter(Document.class).fromJson(json).asArrayDocument();
 for (Article article : articles) {
   System.out.println(article.title);
 }
 ```
 
-### Retrofit
+## Usage
 
-Simply add a [retrofit converter](https://gist.github.com/kamikat/baa7d086f932b0dc4fc3f9f02e37a485) and you get all the
-cool stuff in Retrofit!
-
-```java
-public interface MyAPI {
-
-    @GET("posts")
-    Call<Post[]> listPosts();
-
-    @GET("posts/{id}")
-    Call<Post> getPost(@Path("id") String id);
-
-    @GET("posts/{id}/comments")
-    Call<Comment[]> getComments(@Path("id") String id);
-
-    @POST("posts/{id}/comments")
-    Call<Document> addComment(@Path("id") String id, @Body Comment comment);
-
-    @DELETE("posts/{id}/relationships/comments")
-    Call<Document> removeComments(@Path("id") String id, @Body ResourceIdentifier[] commentIds);
-
-    @GET("posts/{id}/relationships/comments")
-    Call<ResourceIdentifier[]> getCommentRels(@Path("id") String id);
-}
-```
-
-No annoying `Call<Document<RESOURCE>>` declaration is required as `Document` is wrap/unwrapped automatically by the converter.
-Of course, you can just declare them if you need `Document` to collecting errors or any other information.
-
-### Server Applications
-
-All functions of moshi-jsonapi can actually work on server running Java platform.
-
-## Modelling
+### Resource Object
 
 Extend a `Resource` class to create a model for resource object.
 
@@ -100,10 +65,10 @@ public class Article extends Resource {
 Relationships can be resolved to resource object in a `Document`:
 
 ```java
-Person author = article.author.get(article.getContext());
+Person author = article.author.get(article.getDocument());
 ```
 
-You can use `Resource.getContext()` to access the `Document` object the `Resource` be added/included in.
+You can use `Resource.getDocument()` to access the `Document` object the `Resource` be added/included in.
 Further more, with a little bit encapsulation:
 
 ```java
@@ -122,25 +87,33 @@ public class Article extends Resource {
     }
 
     public Person getAuthor() {
-        return author.get(getContext());
+        return author.get(getDocument());
     }
 
     public List<Comment> getComments() {
-        return comments.get(getContext());
+        return comments.get(getDocument());
     }
 }
 ```
 
 ### Document
 
+`Document` interfaces denotes a JSON API document, document object contains one of the following attributes:
+
+- `data` the primary data, can be null, resource object or array of resource object
+- `error` error object
+- `meta`
+
+To keep consistency with the specification, moshi-jsonapi implements `ArrayDocument<T>` and `ObjectDocument<T>`.
+`Document` object can be converted with `Document.<T>asXDocument()` function.
+
 ```java
-Document<Article> document = new Document<>();
-document.include(author);
+ObjectDocument<Article> document = new ObjectDocument<>();
 document.set(article);
+document.include(author);
 
 // Serialize
-JsonAdapter<Document<Article>> adapter = moshi.adapter(document.getType());
-System.out.println(adapter.toJson(document));
+System.out.println(moshi.adapter(Document.class).toJson(document));
 // => {
 //      data: { "type": "articles", "relationships": { "author": { "data": "type": "people", id: "1" } } },
 //      included: [
@@ -149,17 +122,17 @@ System.out.println(adapter.toJson(document));
 //    }
 
 // Deserialize
-Document<Article> document2 = adapter.fromJson(...);
-assert document2.get() instanceof Article
-assert document2.get().getContext() == document2
+Document document2 = adapter.fromJson(...);
+ObjectDocument<Article> document3 = document2.asObjectDocument();
+assert document3.get() instanceof Article
+assert document3.get().getDocument() == document3
 ```
 
-All resources added/included into a `Document` will have a back-reference which can be accessed from `Resource.getContext`.
+The linkage (relationship) of a resource object is resolved in document of the resource object (check `Resource.getDocument()`).
 
-### Fallback
+### Default Resource Type
 
-Deserialization will fail when processing an unknown type of resource.
-Create a `default` typed model to avoid this problem and parses all unknown type of resource object into the default model.
+Create a `default` typed class to have all unknown type parsed in the class to avoid deserialization error processing unknown type of resource.
 
 ```java
 @JsonApi(type = "default")
@@ -173,12 +146,49 @@ class Unknown extends Resource {
 You'd like to access `meta`/`links`/`jsonapi` value on `Document` for example.
 
 ```java
-Document<Article> document = ...;
+Document document = ...;
 document.getMeta() // => JsonBuffer
 ```
 
 As `meta` and `links` can contain a variant of objects, they are not been parsed when access with `getMeta` and `getLinks`.
 You will get a `JsonBuffer` and you're expected to implement your `JsonAdapter<T>` to read/write these objects.
+
+### Retrofit
+
+Retrofit extension library (see following section) provides `JsonApiConverterFactory` to get integrate with Retrofit 2.
+Here's an example:
+
+```java
+Retrofit retrofit = new Retrofit.Builder()
+        // ...
+        .addConverterFactory(JsonApiConverterFactory.create(moshi))
+        .build()
+retrofit.create(MyAPI.class);
+```
+
+And `MyAPI` interface:
+
+```java
+public interface MyAPI {
+
+    @GET("posts")
+    Call<Post[]> listPosts();
+
+    @GET("posts/{id}")
+    Call<Post> getPost(@Path("id") String id);
+
+    @GET("posts/{id}/comments")
+    Call<List<Comment>> getComments(@Path("id") String id);
+
+    @POST("posts/{id}/comments")
+    Call<Document> addComment(@Path("id") String id, @Body Comment comment);
+
+    @GET("posts/{id}/relationships/comments")
+    Call<ResourceIdentifier[]> getCommentRels(@Path("id") String id);
+}
+```
+
+Note that the body can either be serialized/deserialized to resource object or document object with additional information.
 
 ## Download
 
@@ -190,9 +200,13 @@ repositories {
 }
 
 dependencies {
-    compile 'moe.banana:moshi-jsonapi:<version>'
+    implementation 'com.squareup.moshi:moshi:1.4.0'                        // required, peer dependency to moshi
+    implementation 'moe.banana:moshi-jsonapi:<version>'                    // required, core library
+    implementation 'moe.banana:moshi-jsonapi-retrofit-converter:<version>' // optional, for retrofit
 }
 ```
+
+For library version >= 3.5, moshi is removed from runtime dependencies of the library to become a peer dependency.
 
 Use snapshot version:
 
@@ -202,11 +216,12 @@ repositories {
 }
 
 dependencies {
-    compile 'moe.banana:moshi-jsonapi:master-SNAPSHOT'
+    implementation 'com.squareup.moshi:moshi:1.4.0'
+    implementation 'moe.banana:moshi-jsonapi:master-SNAPSHOT'
 }
 ```
 
-(you may be asked to clean gradle library cache to access the latest snapshot)
+NOTE: It's necessary clean gradle library cache to access the latest snapshot version.
 
 ## Proguard Guide
 
@@ -244,6 +259,14 @@ For moshi, if you use a custom JSON adapter (e.g. for Enum types):
 | Relationships                  | Yes       | `HasOne` and `HasMany`                          |
 | Inclusion of related resources | Yes       |                                                 |
 | Resource IDs                   | Yes       |                                                 |
+
+## Migration Note for 3.4 and 3.5
+
+Release 3.4 removed type parameter from `Document` object which can break your code. Please replace the type declaration with
+`ObjectDocument<T>` or `ArrayDocument<T>` if you insist that.
+
+Release 3.5 changes the dependency to moshi from runtime dependency to compile-only dependency, which means moshi-jsonapi does no longer
+includes moshi as a dependency for your project. And you need to add moshi to the dependencies of the project manually.
 
 ## Migration from 2.x to 3.x
 
